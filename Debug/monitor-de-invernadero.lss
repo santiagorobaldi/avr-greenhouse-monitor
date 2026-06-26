@@ -23,11 +23,11 @@ Idx Name          Size      VMA       LMA       File off  Algn
                   CONTENTS, READONLY, DEBUGGING
   9 .debug_frame  00000304  00000000  00000000  00004a6c  2**2
                   CONTENTS, READONLY, DEBUGGING
- 10 .debug_str    00000794  00000000  00000000  00004d70  2**0
+ 10 .debug_str    00000760  00000000  00000000  00004d70  2**0
                   CONTENTS, READONLY, DEBUGGING
- 11 .debug_loc    000007dd  00000000  00000000  00005504  2**0
+ 11 .debug_loc    000007dd  00000000  00000000  000054d0  2**0
                   CONTENTS, READONLY, DEBUGGING
- 12 .debug_ranges 000000f8  00000000  00000000  00005ce1  2**0
+ 12 .debug_ranges 000000f8  00000000  00000000  00005cad  2**0
                   CONTENTS, READONLY, DEBUGGING
 
 Disassembly of section .text:
@@ -931,6 +931,12 @@ void Control_MonitorearInvernadero(void) {
      598:	08 95       	ret
 
 0000059a <Leer_DHT11>:
+#include <avr/interrupt.h>
+
+uint8_t dht11_temp = 0;
+uint8_t dht11_hum = 0;
+
+uint8_t Leer_DHT11(void) {
      59a:	cf 93       	push	r28
      59c:	df 93       	push	r29
      59e:	00 d0       	rcall	.+0      	; 0x5a0 <Leer_DHT11+0x6>
@@ -938,6 +944,7 @@ void Control_MonitorearInvernadero(void) {
      5a2:	1f 92       	push	r1
      5a4:	cd b7       	in	r28, 0x3d	; 61
      5a6:	de b7       	in	r29, 0x3e	; 62
+	uint8_t bits[5] = {0, 0, 0, 0, 0};
      5a8:	fe 01       	movw	r30, r28
      5aa:	31 96       	adiw	r30, 0x01	; 1
      5ac:	85 e0       	ldi	r24, 0x05	; 5
@@ -945,9 +952,15 @@ void Control_MonitorearInvernadero(void) {
      5b0:	1d 92       	st	X+, r1
      5b2:	8a 95       	dec	r24
      5b4:	e9 f7       	brne	.-6      	; 0x5b0 <Leer_DHT11+0x16>
+	uint8_t i, j;
+	uint16_t timeout;
+
+	// 1. EL "DESPERTADOR": Enviar pulso de START (Sección 5 del Datasheet)
+	DDRB |= (1 << PB4);   // Configuramos PB4 como salida
      5b6:	84 b1       	in	r24, 0x04	; 4
      5b8:	80 61       	ori	r24, 0x10	; 16
      5ba:	84 b9       	out	0x04, r24	; 4
+	PORTB &= ~(1 << PB4); // Tiramos la línea a 0V
      5bc:	85 b1       	in	r24, 0x05	; 5
      5be:	8f 7e       	andi	r24, 0xEF	; 239
      5c0:	85 b9       	out	0x05, r24	; 5
@@ -966,22 +979,39 @@ void Control_MonitorearInvernadero(void) {
      5ce:	e1 f7       	brne	.-8      	; 0x5c8 <Leer_DHT11+0x2e>
      5d0:	00 c0       	rjmp	.+0      	; 0x5d2 <Leer_DHT11+0x38>
      5d2:	00 00       	nop
+	_delay_ms(18);        // Mantenemos 0V por al menos 18ms
+	PORTB |= (1 << PB4);  // Soltamos la línea a 5V
      5d4:	85 b1       	in	r24, 0x05	; 5
      5d6:	80 61       	ori	r24, 0x10	; 16
      5d8:	85 b9       	out	0x05, r24	; 5
+	DDRB &= ~(1 << PB4);  // Configuramos PB4 como entrada para escuchar
      5da:	84 b1       	in	r24, 0x04	; 4
      5dc:	8f 7e       	andi	r24, 0xEF	; 239
      5de:	84 b9       	out	0x04, r24	; 4
+
+	// SECCIÓN CRÍTICA: Apagamos interrupciones para no perder la ventana de microsegundos
+	cli();
      5e0:	f8 94       	cli
+
+	// 2. ESPERAR RESPUESTA (Acknowledge de 80us)
+	timeout = 10000;
      5e2:	20 e1       	ldi	r18, 0x10	; 16
      5e4:	37 e2       	ldi	r19, 0x27	; 39
+	while (PINB & (1 << PB4)) {
      5e6:	06 c0       	rjmp	.+12     	; 0x5f4 <Leer_DHT11+0x5a>
+		if (--timeout == 0) { sei(); return 0; } // Timeout: Sensor desconectado
      5e8:	21 50       	subi	r18, 0x01	; 1
      5ea:	31 09       	sbc	r19, r1
      5ec:	19 f4       	brne	.+6      	; 0x5f4 <Leer_DHT11+0x5a>
      5ee:	78 94       	sei
      5f0:	80 e0       	ldi	r24, 0x00	; 0
      5f2:	6b c0       	rjmp	.+214    	; 0x6ca <Leer_DHT11+0x130>
+	// SECCIÓN CRÍTICA: Apagamos interrupciones para no perder la ventana de microsegundos
+	cli();
+
+	// 2. ESPERAR RESPUESTA (Acknowledge de 80us)
+	timeout = 10000;
+	while (PINB & (1 << PB4)) {
      5f4:	83 b1       	in	r24, 0x03	; 3
      5f6:	48 2f       	mov	r20, r24
      5f8:	40 71       	andi	r20, 0x10	; 16
@@ -990,11 +1020,23 @@ void Control_MonitorearInvernadero(void) {
      5fe:	20 e1       	ldi	r18, 0x10	; 16
      600:	37 e2       	ldi	r19, 0x27	; 39
      602:	05 c0       	rjmp	.+10     	; 0x60e <Leer_DHT11+0x74>
+		if (--timeout == 0) { sei(); return 0; } // Timeout: Sensor desconectado
+	}
+
+	timeout = 10000;
+	while (!(PINB & (1 << PB4))) {
+		if (--timeout == 0) { sei(); return 0; }
      604:	21 50       	subi	r18, 0x01	; 1
      606:	31 09       	sbc	r19, r1
      608:	11 f4       	brne	.+4      	; 0x60e <Leer_DHT11+0x74>
      60a:	78 94       	sei
      60c:	5e c0       	rjmp	.+188    	; 0x6ca <Leer_DHT11+0x130>
+	while (PINB & (1 << PB4)) {
+		if (--timeout == 0) { sei(); return 0; } // Timeout: Sensor desconectado
+	}
+
+	timeout = 10000;
+	while (!(PINB & (1 << PB4))) {
      60e:	93 b1       	in	r25, 0x03	; 3
      610:	89 2f       	mov	r24, r25
      612:	80 71       	andi	r24, 0x10	; 16
@@ -1003,12 +1045,24 @@ void Control_MonitorearInvernadero(void) {
      618:	20 e1       	ldi	r18, 0x10	; 16
      61a:	37 e2       	ldi	r19, 0x27	; 39
      61c:	06 c0       	rjmp	.+12     	; 0x62a <Leer_DHT11+0x90>
+		if (--timeout == 0) { sei(); return 0; }
+	}
+
+	timeout = 10000;
+	while (PINB & (1 << PB4)) {
+		if (--timeout == 0) { sei(); return 0; }
      61e:	21 50       	subi	r18, 0x01	; 1
      620:	31 09       	sbc	r19, r1
      622:	19 f4       	brne	.+6      	; 0x62a <Leer_DHT11+0x90>
      624:	78 94       	sei
      626:	84 2f       	mov	r24, r20
      628:	50 c0       	rjmp	.+160    	; 0x6ca <Leer_DHT11+0x130>
+	while (!(PINB & (1 << PB4))) {
+		if (--timeout == 0) { sei(); return 0; }
+	}
+
+	timeout = 10000;
+	while (PINB & (1 << PB4)) {
      62a:	83 b1       	in	r24, 0x03	; 3
      62c:	58 2f       	mov	r21, r24
      62e:	50 71       	andi	r21, 0x10	; 16
@@ -1016,6 +1070,12 @@ void Control_MonitorearInvernadero(void) {
      632:	f5 cf       	rjmp	.-22     	; 0x61e <Leer_DHT11+0x84>
      634:	60 e0       	ldi	r22, 0x00	; 0
      636:	35 c0       	rjmp	.+106    	; 0x6a2 <Leer_DHT11+0x108>
+		for (i = 0; i < 8; i++) {
+			
+			// Esperar a que el pulso suba de 0 a 1 (Fin de los 50us en bajo)
+			timeout = 10000;
+			while (!(PINB & (1 << PB4))) {
+				if (--timeout == 0) { sei(); return 0; }
      638:	21 50       	subi	r18, 0x01	; 1
      63a:	31 09       	sbc	r19, r1
      63c:	21 f4       	brne	.+8      	; 0x646 <Leer_DHT11+0xac>
@@ -1023,6 +1083,12 @@ void Control_MonitorearInvernadero(void) {
      640:	44 c0       	rjmp	.+136    	; 0x6ca <Leer_DHT11+0x130>
      642:	20 e1       	ldi	r18, 0x10	; 16
      644:	37 e2       	ldi	r19, 0x27	; 39
+	for (j = 0; j < 5; j++) {
+		for (i = 0; i < 8; i++) {
+			
+			// Esperar a que el pulso suba de 0 a 1 (Fin de los 50us en bajo)
+			timeout = 10000;
+			while (!(PINB & (1 << PB4))) {
      646:	93 b1       	in	r25, 0x03	; 3
      648:	89 2f       	mov	r24, r25
      64a:	80 71       	andi	r24, 0x10	; 16
@@ -1037,8 +1103,16 @@ void Control_MonitorearInvernadero(void) {
      650:	90 ea       	ldi	r25, 0xA0	; 160
      652:	9a 95       	dec	r25
      654:	f1 f7       	brne	.-4      	; 0x652 <Leer_DHT11+0xb8>
+			}
+
+			// Ventana de decisión empírica para distinguir '0' (28us) de '1' (70us)
+			_delay_us(30);
+
+			if (PINB & (1 << PB4)) {
      656:	1c 9b       	sbis	0x03, 4	; 3
      658:	1e c0       	rjmp	.+60     	; 0x696 <Leer_DHT11+0xfc>
+				// Si pasados 30us sigue en 1, el pulso es largo. Es un '1' lógico.
+				bits[j] |= (1 << (7 - i));
      65a:	27 e0       	ldi	r18, 0x07	; 7
      65c:	30 e0       	ldi	r19, 0x00	; 0
      65e:	24 1b       	sub	r18, r20
@@ -1059,25 +1133,58 @@ void Control_MonitorearInvernadero(void) {
      67c:	90 81       	ld	r25, Z
      67e:	89 2b       	or	r24, r25
      680:	80 83       	st	Z, r24
+				
+				// Ahora debemos esperar a que baje a 0 para buscar el siguiente bit
+				timeout = 10000;
      682:	80 e1       	ldi	r24, 0x10	; 16
      684:	97 e2       	ldi	r25, 0x27	; 39
+				while (PINB & (1 << PB4)) {
      686:	05 c0       	rjmp	.+10     	; 0x692 <Leer_DHT11+0xf8>
+					if (--timeout == 0) { sei(); return 0; }
      688:	01 97       	sbiw	r24, 0x01	; 1
      68a:	19 f4       	brne	.+6      	; 0x692 <Leer_DHT11+0xf8>
      68c:	78 94       	sei
      68e:	85 2f       	mov	r24, r21
      690:	1c c0       	rjmp	.+56     	; 0x6ca <Leer_DHT11+0x130>
+				// Si pasados 30us sigue en 1, el pulso es largo. Es un '1' lógico.
+				bits[j] |= (1 << (7 - i));
+				
+				// Ahora debemos esperar a que baje a 0 para buscar el siguiente bit
+				timeout = 10000;
+				while (PINB & (1 << PB4)) {
      692:	1c 99       	sbic	0x03, 4	; 3
      694:	f9 cf       	rjmp	.-14     	; 0x688 <Leer_DHT11+0xee>
+		if (--timeout == 0) { sei(); return 0; }
+	}
+
+	// 3. LEER LOS 40 BITS DE DATOS
+	for (j = 0; j < 5; j++) {
+		for (i = 0; i < 8; i++) {
      696:	4f 5f       	subi	r20, 0xFF	; 255
      698:	01 c0       	rjmp	.+2      	; 0x69c <Leer_DHT11+0x102>
      69a:	40 e0       	ldi	r20, 0x00	; 0
      69c:	48 30       	cpi	r20, 0x08	; 8
      69e:	88 f2       	brcs	.-94     	; 0x642 <Leer_DHT11+0xa8>
+	while (PINB & (1 << PB4)) {
+		if (--timeout == 0) { sei(); return 0; }
+	}
+
+	// 3. LEER LOS 40 BITS DE DATOS
+	for (j = 0; j < 5; j++) {
      6a0:	6f 5f       	subi	r22, 0xFF	; 255
      6a2:	65 30       	cpi	r22, 0x05	; 5
      6a4:	d0 f3       	brcs	.-12     	; 0x69a <Leer_DHT11+0x100>
+			// Como el arreglo se inicializó en ceros, no hace falta hacer nada.
+		}
+	}
+
+	// FIN DE SECCIÓN CRÍTICA: Volvemos a encender las interrupciones
+	sei();
      6a6:	78 94       	sei
+
+	// 4. VALIDACIÓN DE INTEGRIDAD (Checksum)
+	// Sumamos los primeros 4 bytes y lo comparamos con el 5to byte recibido
+	if ((uint8_t)(bits[0] + bits[1] + bits[2] + bits[3]) == bits[4]) {
      6a8:	39 81       	ldd	r19, Y+1	; 0x01
      6aa:	8a 81       	ldd	r24, Y+2	; 0x02
      6ac:	2b 81       	ldd	r18, Y+3	; 0x03
@@ -1088,10 +1195,16 @@ void Control_MonitorearInvernadero(void) {
      6b6:	9d 81       	ldd	r25, Y+5	; 0x05
      6b8:	89 13       	cpse	r24, r25
      6ba:	06 c0       	rjmp	.+12     	; 0x6c8 <Leer_DHT11+0x12e>
+		dht11_hum = bits[0];  // Byte 1: Humedad Entera
      6bc:	30 93 93 03 	sts	0x0393, r19	; 0x800393 <dht11_hum>
+		dht11_temp = bits[2]; // Byte 3: Temperatura Entera
      6c0:	20 93 94 03 	sts	0x0394, r18	; 0x800394 <dht11_temp>
+		return 1; // Lectura exitosa
      6c4:	81 e0       	ldi	r24, 0x01	; 1
      6c6:	01 c0       	rjmp	.+2      	; 0x6ca <Leer_DHT11+0x130>
+	}
+
+	return 0; // Falló el Checksum (Hubo ruido eléctrico)
      6c8:	85 2f       	mov	r24, r21
      6ca:	0f 90       	pop	r0
      6cc:	0f 90       	pop	r0
@@ -1103,48 +1216,99 @@ void Control_MonitorearInvernadero(void) {
      6d8:	08 95       	ret
 
 000006da <Setup_I2C>:
+void Setup_I2C(void) {
+    // Configuramos la velocidad del bus a 100 kHz que es el estandar de la industria
+    // F_SCL = F_CPU / (16 + 2 * TWBR * Prescaler)
+    // Despejando TWBR con Prescaler = 1:
+    // TWBR = (16.000.000 / 100.000 - 16) / 2 = 72
+    TWBR = 72; 
      6da:	88 e4       	ldi	r24, 0x48	; 72
      6dc:	80 93 b8 00 	sts	0x00B8, r24	; 0x8000b8 <__TEXT_REGION_LENGTH__+0x7f80b8>
+    TWSR = 0; // Pre-escalador en 1 
      6e0:	10 92 b9 00 	sts	0x00B9, r1	; 0x8000b9 <__TEXT_REGION_LENGTH__+0x7f80b9>
      6e4:	08 95       	ret
 
 000006e6 <I2C_Start>:
+
+void I2C_Start(void) {
+    // Ponemos un 1 en TWINT (para limpiar la bandera y arrancar)
+    // Ponemos un 1 en TWSTA (para generar la condición de START)
+    // Ponemos un 1 en TWEN (para mantener el módulo encendido)
+    TWCR = (1 << TWINT) | (1 << TWSTA) | (1 << TWEN);
      6e6:	84 ea       	ldi	r24, 0xA4	; 164
      6e8:	80 93 bc 00 	sts	0x00BC, r24	; 0x8000bc <__TEXT_REGION_LENGTH__+0x7f80bc>
+   
+    // Nos quedamos esperando confirmacion 
+    while ((TWCR & (1 << TWINT)) == 0); 
      6ec:	80 91 bc 00 	lds	r24, 0x00BC	; 0x8000bc <__TEXT_REGION_LENGTH__+0x7f80bc>
      6f0:	88 23       	and	r24, r24
      6f2:	e4 f7       	brge	.-8      	; 0x6ec <I2C_Start+0x6>
+}
      6f4:	08 95       	ret
 
 000006f6 <I2C_Stop>:
+
+void I2C_Stop(void) {
+    // Ponemos un 1 en TWINT (arrancar), TWSTO (generar STOP) y TWEN (mantener encendido)
+    TWCR = (1 << TWINT) | (1 << TWEN) | (1 << TWSTO);
      6f6:	84 e9       	ldi	r24, 0x94	; 148
      6f8:	80 93 bc 00 	sts	0x00BC, r24	; 0x8000bc <__TEXT_REGION_LENGTH__+0x7f80bc>
      6fc:	08 95       	ret
 
 000006fe <I2C_Write>:
+}
+
+void I2C_Write(uint8_t dato) {
+    TWDR = dato; // Cargamos el byte que queremos enviar en el registro de datos
      6fe:	80 93 bb 00 	sts	0x00BB, r24	; 0x8000bb <__TEXT_REGION_LENGTH__+0x7f80bb>
+    
+    // Le damos la orden de enviar limpiando el TWINT y mantemos prendido el TWEN por seguridad
+    TWCR = (1 << TWINT) | (1 << TWEN); 
      702:	84 e8       	ldi	r24, 0x84	; 132
      704:	80 93 bc 00 	sts	0x00BC, r24	; 0x8000bc <__TEXT_REGION_LENGTH__+0x7f80bc>
+    
+    // Esperamos a que el hardware termine de mandar los 8 bits y lea el ACK 
+    while (!(TWCR & (1 << TWINT))); 
      708:	80 91 bc 00 	lds	r24, 0x00BC	; 0x8000bc <__TEXT_REGION_LENGTH__+0x7f80bc>
      70c:	88 23       	and	r24, r24
      70e:	e4 f7       	brge	.-8      	; 0x708 <I2C_Write+0xa>
+}
      710:	08 95       	ret
 
 00000712 <I2C_Read_Nack>:
+
+uint8_t I2C_Read_Nack(void) {
+    // Le decimos que lea un byte, pero NO activamos TWEA. 
+    // Esto genera un NACK, diciéndole al esclavo (ej. RTC): "Este es el último byte, no mandes más".
+    TWCR = (1 << TWINT) | (1 << TWEN);
      712:	84 e8       	ldi	r24, 0x84	; 132
      714:	80 93 bc 00 	sts	0x00BC, r24	; 0x8000bc <__TEXT_REGION_LENGTH__+0x7f80bc>
+    
+    // Esperamos que termine de llegar el byte
+    while (!(TWCR & (1 << TWINT))); 
      718:	80 91 bc 00 	lds	r24, 0x00BC	; 0x8000bc <__TEXT_REGION_LENGTH__+0x7f80bc>
      71c:	88 23       	and	r24, r24
      71e:	e4 f7       	brge	.-8      	; 0x718 <I2C_Read_Nack+0x6>
+    return TWDR; // Devolvemos lo que llegó
      720:	80 91 bb 00 	lds	r24, 0x00BB	; 0x8000bb <__TEXT_REGION_LENGTH__+0x7f80bb>
+}
      724:	08 95       	ret
 
 00000726 <I2C_Read_Ack>:
+
+uint8_t I2C_Read_Ack(void) {
+    // Le decimos que lea, y SÍ activamos TWEA.
+    // Esto genera un ACK, diciéndole al esclavo: "Llegó bien, preparame el siguiente registro".
+    TWCR = (1 << TWINT) | (1 << TWEN) | (1 << TWEA);
      726:	84 ec       	ldi	r24, 0xC4	; 196
      728:	80 93 bc 00 	sts	0x00BC, r24	; 0x8000bc <__TEXT_REGION_LENGTH__+0x7f80bc>
+    
+    // Esperamos que termine de llegar el byte
+    while (!(TWCR & (1 << TWINT))); 
      72c:	80 91 bc 00 	lds	r24, 0x00BC	; 0x8000bc <__TEXT_REGION_LENGTH__+0x7f80bc>
      730:	88 23       	and	r24, r24
      732:	e4 f7       	brge	.-8      	; 0x72c <I2C_Read_Ack+0x6>
+    return TWDR; // Devolvemos lo que llegó
      734:	80 91 bb 00 	lds	r24, 0x00BB	; 0x8000bb <__TEXT_REGION_LENGTH__+0x7f80bb>
      738:	08 95       	ret
 
@@ -1208,18 +1372,30 @@ int main(void) {
      782:	e2 cf       	rjmp	.-60     	; 0x748 <main+0xe>
 
 00000784 <Setup_Timer>:
+// variables para el main
+volatile uint8_t flag_timer_10ms = 0; // pasaron 10ms - lo dejamos porque a futuro es mas escalable tener un flag de 10ms y poder usarlo que tener uno de 1seg.
+volatile uint8_t flag_timer_1seg = 0; // paso un segundo
+
+void Setup_Timer(void) {
+	TCCR1A = 0;
      784:	10 92 80 00 	sts	0x0080, r1	; 0x800080 <__TEXT_REGION_LENGTH__+0x7f8080>
+	TCCR1B = (1 << WGM12) | (1 << CS11) | (1 << CS10); // CTC, Prescaler 64
      788:	8b e0       	ldi	r24, 0x0B	; 11
      78a:	80 93 81 00 	sts	0x0081, r24	; 0x800081 <__TEXT_REGION_LENGTH__+0x7f8081>
+	OCR1A = 2499; // 10ms a 16MHz
      78e:	83 ec       	ldi	r24, 0xC3	; 195
      790:	99 e0       	ldi	r25, 0x09	; 9
      792:	90 93 89 00 	sts	0x0089, r25	; 0x800089 <__TEXT_REGION_LENGTH__+0x7f8089>
      796:	80 93 88 00 	sts	0x0088, r24	; 0x800088 <__TEXT_REGION_LENGTH__+0x7f8088>
+	TIMSK1 = (1 << OCIE1A);
      79a:	82 e0       	ldi	r24, 0x02	; 2
      79c:	80 93 6f 00 	sts	0x006F, r24	; 0x80006f <__TEXT_REGION_LENGTH__+0x7f806f>
      7a0:	08 95       	ret
 
 000007a2 <__vector_11>:
+}
+
+ISR(TIMER1_COMPA_vect) {
      7a2:	1f 92       	push	r1
      7a4:	0f 92       	push	r0
      7a6:	0f b6       	in	r0, 0x3f	; 63
@@ -1227,20 +1403,27 @@ int main(void) {
      7aa:	11 24       	eor	r1, r1
      7ac:	8f 93       	push	r24
      7ae:	9f 93       	push	r25
+	flag_timer_10ms = 1; 
      7b0:	81 e0       	ldi	r24, 0x01	; 1
      7b2:	80 93 99 03 	sts	0x0399, r24	; 0x800399 <flag_timer_10ms>
+	static uint16_t contador_ticks = 0;
+	contador_ticks++;
      7b6:	80 91 96 03 	lds	r24, 0x0396	; 0x800396 <contador_ticks.1615>
      7ba:	90 91 97 03 	lds	r25, 0x0397	; 0x800397 <contador_ticks.1615+0x1>
      7be:	01 96       	adiw	r24, 0x01	; 1
      7c0:	90 93 97 03 	sts	0x0397, r25	; 0x800397 <contador_ticks.1615+0x1>
      7c4:	80 93 96 03 	sts	0x0396, r24	; 0x800396 <contador_ticks.1615>
+	if (contador_ticks >= 100) {
      7c8:	84 36       	cpi	r24, 0x64	; 100
      7ca:	91 05       	cpc	r25, r1
      7cc:	38 f0       	brcs	.+14     	; 0x7dc <__vector_11+0x3a>
+		contador_ticks = 0;
      7ce:	10 92 97 03 	sts	0x0397, r1	; 0x800397 <contador_ticks.1615+0x1>
      7d2:	10 92 96 03 	sts	0x0396, r1	; 0x800396 <contador_ticks.1615>
+		flag_timer_1seg = 1;
      7d6:	81 e0       	ldi	r24, 0x01	; 1
      7d8:	80 93 98 03 	sts	0x0398, r24	; 0x800398 <flag_timer_1seg>
+	}
      7dc:	9f 91       	pop	r25
      7de:	8f 91       	pop	r24
      7e0:	0f 90       	pop	r0
