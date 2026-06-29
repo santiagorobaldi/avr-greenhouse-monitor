@@ -9,7 +9,7 @@
 #include "i2c.h"
 #include "control.h"
 
-uint8_t T_muestreo = 5;
+uint8_t T_muestreo = 2;
 uint8_t contador_T = 0;
 
 int main(void) {

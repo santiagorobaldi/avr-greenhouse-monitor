@@ -15,28 +15,28 @@ uint8_t Leer_DHT11(void) {
 	uint16_t timeout;
 
 	// 1. EL "DESPERTADOR": Enviar pulso de START (Sección 5 del Datasheet)
-	DDRB |= (1 << PB4);   // Configuramos PB4 como salida
-	PORTB &= ~(1 << PB4); // Tiramos la línea a 0V
+	DDRC |= (1 << PC0);   // Configuramos PC0 como salida
+	PORTC &= ~(1 << PC0); // Tiramos la línea a 0V
 	_delay_ms(18);        // Mantenemos 0V por al menos 18ms
-	PORTB |= (1 << PB4);  // Soltamos la línea a 5V
-	DDRB &= ~(1 << PB4);  // Configuramos PB4 como entrada para escuchar
-
+	PORTC |= (1 << PC0);  // Soltamos la línea a 5V
+	DDRC &= ~(1 << PC0);  // Configuramos PC0 como entrada para escuchar
+	
 	// SECCIÓN CRÍTICA: Apagamos interrupciones para no perder la ventana de microsegundos
 	cli();
 
-	// 2. ESPERAR RESPUESTA (Acknowledge de 80us)
-	timeout = 10000;
-	while (PINB & (1 << PB4)) {
+	
+	timeout = 200;
+	while (PINC & (1 << PC0)) { // 
 		if (--timeout == 0) { sei(); return 0; } // Timeout: Sensor desconectado
 	}
-
-	timeout = 10000;
-	while (!(PINB & (1 << PB4))) {
+	// 2. ESPERAR RESPUESTA (Acknowledge de 80us)
+	timeout = 400;
+	while (!(PINC & (1 << PC0))) {
 		if (--timeout == 0) { sei(); return 0; }
 	}
 
-	timeout = 10000;
-	while (PINB & (1 << PB4)) {
+	timeout = 400;
+	while (PINC & (1 << PC0)) {
 		if (--timeout == 0) { sei(); return 0; }
 	}
 
@@ -45,21 +45,21 @@ uint8_t Leer_DHT11(void) {
 		for (i = 0; i < 8; i++) {
 			
 			// Esperar a que el pulso suba de 0 a 1 (Fin de los 50us en bajo)
-			timeout = 10000;
-			while (!(PINB & (1 << PB4))) {
+			timeout = 300;
+			while (!(PINC & (1 << PC0))) {
 				if (--timeout == 0) { sei(); return 0; }
 			}
 
 			// Ventana de decisión empírica para distinguir '0' (28us) de '1' (70us)
 			_delay_us(30);
 
-			if (PINB & (1 << PB4)) {
+			if (PINC & (1 << PC0)) {
 				// Si pasados 30us sigue en 1, el pulso es largo. Es un '1' lógico.
 				bits[j] |= (1 << (7 - i));
 				
 				// Ahora debemos esperar a que baje a 0 para buscar el siguiente bit
-				timeout = 10000;
-				while (PINB & (1 << PB4)) {
+				timeout = 400;
+				while (PINC & (1 << PC0)) {
 					if (--timeout == 0) { sei(); return 0; }
 				}
 			}
